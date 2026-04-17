@@ -1,0 +1,29 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    match /users/{uid} {
+      allow read, write: if request.auth != null && request.auth.uid == uid;
+
+      match /feeds/{feedId} {
+        allow read, write: if request.auth != null && request.auth.uid == uid;
+      }
+
+      match /readClusters/{clusterId} {
+        allow read, write: if request.auth != null && request.auth.uid == uid;
+      }
+    }
+
+    // Articles and clusters are written by backend services only;
+    // users may only read their own.
+    match /articles/{articleId} {
+      allow read: if request.auth != null && request.auth.uid == resource.data.uid;
+      allow write: if false;
+    }
+
+    match /clusters/{clusterId} {
+      allow read: if request.auth != null && request.auth.uid == resource.data.uid;
+      allow write: if false;
+    }
+  }
+}

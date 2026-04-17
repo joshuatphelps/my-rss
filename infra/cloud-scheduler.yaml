@@ -1,0 +1,21 @@
+# Cloud Scheduler job — triggers the feed-fetcher every 15 minutes.
+#
+# Deploy with:
+#   gcloud scheduler jobs create http feed-fetch-job \
+#     --schedule="*/15 * * * *" \
+#     --uri="${FEED_FETCHER_URL}/fetch" \
+#     --http-method=POST \
+#     --oidc-service-account-email="${SCHEDULER_SA}@${PROJECT_ID}.iam.gserviceaccount.com" \
+#     --location=us-central1
+#
+# Required IAM:
+#   - Scheduler SA needs roles/run.invoker on the feed-fetcher Cloud Run service
+
+name: feed-fetch-job
+schedule: "*/15 * * * *"
+timeZone: UTC
+httpTarget:
+  uri: "${FEED_FETCHER_URL}/fetch"
+  httpMethod: POST
+  oidcToken:
+    serviceAccountEmail: "${SCHEDULER_SA}@${PROJECT_ID}.iam.gserviceaccount.com"

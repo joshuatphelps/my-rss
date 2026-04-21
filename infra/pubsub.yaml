@@ -2,19 +2,31 @@
 #
 # Setup commands:
 #   gcloud pubsub topics create raw-articles
+#   gcloud pubsub topics create raw-articles-dead-letter
+#
+#   # Allow Pub/Sub SA to publish to dead-letter topic and read from the main subscription
+#   gcloud pubsub topics add-iam-policy-binding raw-articles-dead-letter \
+#     --member="serviceAccount:${PUBSUB_SA}" \
+#     --role="roles/pubsub.publisher"
+#
+#   gcloud pubsub subscriptions add-iam-policy-binding raw-articles-processor \
+#     --member="serviceAccount:${PUBSUB_SA}" \
+#     --role="roles/pubsub.subscriber"
 #
 #   gcloud pubsub subscriptions create raw-articles-processor \
 #     --topic=raw-articles \
 #     --push-endpoint="${ARTICLE_PROCESSOR_URL}" \
-#     --push-auth-service-account="${PUBSUB_SA}@${PROJECT_ID}.iam.gserviceaccount.com" \
+#     --push-auth-service-account="${PUBSUB_SA}" \
 #     --ack-deadline=60 \
-#     --max-delivery-attempts=5
+#     --max-delivery-attempts=5 \
+#     --dead-letter-topic=raw-articles-dead-letter
 #
 # Required IAM:
 #   - Pub/Sub SA needs roles/run.invoker on the article-processor Cloud Run service
 #   - feed-fetcher service account needs roles/pubsub.publisher on the raw-articles topic
 
 topic: raw-articles
+deadLetterTopic: raw-articles-dead-letter
 subscription:
   name: raw-articles-processor
   pushEndpoint: "${ARTICLE_PROCESSOR_URL}"

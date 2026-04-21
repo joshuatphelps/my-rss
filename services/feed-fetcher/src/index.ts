@@ -14,6 +14,8 @@ const pubsub = new PubSub()
 const parser = new Parser()
 
 const TOPIC = process.env.PUBSUB_TOPIC ?? 'raw-articles'
+// When set, POSTs directly to the processor instead of Pub/Sub (local dev only)
+const PROCESSOR_URL = process.env.ARTICLE_PROCESSOR_URL
 
 app.get('/health', (_req, res) => {
   res.json({ ok: true })
@@ -25,7 +27,7 @@ app.post('/fetch', async (_req, res) => {
 
   try {
     const usersSnap = await db.collection('users').get()
-    const topic = pubsub.topic(TOPIC)
+    const topic = PROCESSOR_URL ? null : pubsub.topic(TOPIC)
 
     for (const userDoc of usersSnap.docs) {
       const uid = userDoc.id
@@ -58,7 +60,17 @@ app.post('/fetch', async (_req, res) => {
                 source: (feed.title as string) ?? new URL(feed.url as string).hostname,
               },
             }
-            await topic.publishMessage({ json: message })
+            if (PROCESSOR_URL) {
+              const encoded = Buffer.from(JSON.stringify(message)).toString('base64')
+              const resp = await fetch(PROCESSOR_URL, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ message: { data: encoded } }),
+              })
+              if (!resp.ok) throw new Error(`Processor returned ${resp.status}`)
+            } else {
+              await topic!.publishMessage({ json: message })
+            }
             published++
           }
 

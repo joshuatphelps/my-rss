@@ -4,14 +4,10 @@
 #   gcloud pubsub topics create raw-articles
 #   gcloud pubsub topics create raw-articles-dead-letter
 #
-#   # Allow Pub/Sub SA to publish to dead-letter topic and read from the main subscription
+#   # Grant Pub/Sub SA publisher rights on dead-letter topic
 #   gcloud pubsub topics add-iam-policy-binding raw-articles-dead-letter \
 #     --member="serviceAccount:${PUBSUB_SA}" \
 #     --role="roles/pubsub.publisher"
-#
-#   gcloud pubsub subscriptions add-iam-policy-binding raw-articles-processor \
-#     --member="serviceAccount:${PUBSUB_SA}" \
-#     --role="roles/pubsub.subscriber"
 #
 #   gcloud pubsub subscriptions create raw-articles-processor \
 #     --topic=raw-articles \
@@ -20,6 +16,11 @@
 #     --ack-deadline=60 \
 #     --max-delivery-attempts=5 \
 #     --dead-letter-topic=raw-articles-dead-letter
+#
+#   # Grant Pub/Sub SA subscriber rights on the subscription (must exist first)
+#   gcloud pubsub subscriptions add-iam-policy-binding raw-articles-processor \
+#     --member="serviceAccount:${PUBSUB_SA}" \
+#     --role="roles/pubsub.subscriber"
 #
 # Required IAM:
 #   - Pub/Sub SA needs roles/run.invoker on the article-processor Cloud Run service

@@ -1,0 +1,29 @@
+{
+  "indexes": [
+    {
+      "collectionGroup": "clusters",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "uid", "order": "ASCENDING" },
+        { "fieldPath": "latestAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "clusters",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "uid", "order": "ASCENDING" },
+        { "fieldPath": "latestAt", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "articles",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "uid", "order": "ASCENDING" },
+        { "fieldPath": "sourceUrl", "order": "ASCENDING" }
+      ]
+    }
+  ],
+  "fieldOverrides": []
+}

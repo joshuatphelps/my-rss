@@ -1,0 +1,53 @@
+# Pub/Sub topic + push subscription for the article processing pipeline.
+#
+# Variables used below:
+#   PUBSUB_SA  = service-{PROJECT_NUMBER}@gcp-sa-pubsub.iam.gserviceaccount.com
+#   ARTICLE_PROCESSOR_URL = Cloud Run URL for article-processor
+#   PROJECT_ID, REGION
+#
+# Setup commands (run in order):
+#
+#   gcloud pubsub topics create raw-articles
+#   gcloud pubsub topics create raw-articles-dead-letter
+#
+#   # Dedicated SA for push auth (avoids actAs issues with the Pub/Sub service agent)
+#   gcloud iam service-accounts create pubsub-push-sa \
+#     --display-name="Pub/Sub Push Auth"
+#
+#   gcloud run services add-iam-policy-binding article-processor \
+#     --region ${REGION} \
+#     --member="serviceAccount:pubsub-push-sa@${PROJECT_ID}.iam.gserviceaccount.com" \
+#     --role="roles/run.invoker"
+#
+#   # Pub/Sub service agent needs publisher rights on the dead-letter topic
+#   gcloud pubsub topics add-iam-policy-binding raw-articles-dead-letter \
+#     --member="serviceAccount:${PUBSUB_SA}" \
+#     --role="roles/pubsub.publisher"
+#
+#   gcloud pubsub subscriptions create raw-articles-processor \
+#     --topic=raw-articles \
+#     --push-endpoint="${ARTICLE_PROCESSOR_URL}" \
+#     --push-auth-service-account="pubsub-push-sa@${PROJECT_ID}.iam.gserviceaccount.com" \
+#     --ack-deadline=60 \
+#     --max-delivery-attempts=5 \
+#     --dead-letter-topic=raw-articles-dead-letter
+#
+#   # Pub/Sub service agent needs subscriber rights on the subscription (for dead-letter forwarding)
+#   gcloud pubsub subscriptions add-iam-policy-binding raw-articles-processor \
+#     --member="serviceAccount:${PUBSUB_SA}" \
+#     --role="roles/pubsub.subscriber"
+#
+# Required IAM summary:
+#   pubsub-push-sa          → roles/run.invoker on article-processor (push auth)
+#   PUBSUB_SA (service agent) → roles/pubsub.publisher on raw-articles-dead-letter
+#   PUBSUB_SA (service agent) → roles/pubsub.subscriber on raw-articles-processor
+#   feed-fetcher-sa         → roles/pubsub.publisher on raw-articles
+
+topic: raw-articles
+deadLetterTopic: raw-articles-dead-letter
+subscription:
+  name: raw-articles-processor
+  pushEndpoint: "${ARTICLE_PROCESSOR_URL}"
+  pushAuthServiceAccount: "pubsub-push-sa@${PROJECT_ID}.iam.gserviceaccount.com"
+  ackDeadlineSeconds: 60
+  maxDeliveryAttempts: 5

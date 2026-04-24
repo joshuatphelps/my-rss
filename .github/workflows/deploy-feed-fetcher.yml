@@ -1,0 +1,47 @@
+name: Deploy feed-fetcher
+
+on:
+  push:
+    branches: [main]
+    paths: ['services/feed-fetcher/**']
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
+
+      - name: Configure Docker
+        run: gcloud auth configure-docker us-central1-docker.pkg.dev --quiet
+
+      - name: Build and push image
+        working-directory: services/feed-fetcher
+        run: |
+          docker build \
+            -t us-central1-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/my-rss/feed-fetcher:${{ github.sha }} \
+            -t us-central1-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/my-rss/feed-fetcher:latest \
+            .
+          docker push us-central1-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/my-rss/feed-fetcher:${{ github.sha }}
+          docker push us-central1-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/my-rss/feed-fetcher:latest
+
+      - name: Deploy to Cloud Run
+        run: |
+          gcloud run deploy feed-fetcher \
+            --image us-central1-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/my-rss/feed-fetcher:${{ github.sha }} \
+            --region us-central1 \
+            --service-account feed-fetcher-sa@${{ secrets.GCP_PROJECT_ID }}.iam.gserviceaccount.com \
+            --set-env-vars PUBSUB_TOPIC=raw-articles \
+            --no-allow-unauthenticated \
+            --min-instances 0 \
+            --max-instances 2 \
+            --quiet

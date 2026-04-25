@@ -2,33 +2,33 @@
 
 ## Infrastructure (GCP)
 
-| Service | Role |
-|---|---|
-| Firebase Auth | Identity — shared across web, iOS, Android |
-| Cloud Firestore | Primary database — users, feeds, clusters, read state |
-| Cloud Run | Stateless API + background services |
-| Cloud Scheduler | Triggers periodic feed fetch jobs |
-| Cloud Pub/Sub | Decouples feed fetcher from article processor |
-| Vertex AI (text-embedding-004) | Semantic embeddings for article grouping |
-| Firebase Hosting | Serves the Next.js web app |
+| Service | Role | Status |
+|---|---|---|
+| Firebase Auth | Identity — shared across web, iOS, Android | Live |
+| Cloud Firestore | Primary database — users, feeds, clusters, read state | Live |
+| Cloud Run | Stateless services (web, feed-fetcher, article-processor) | Live |
+| Cloud Scheduler | Triggers periodic feed fetch every 15 min | Live |
+| Cloud Pub/Sub | Decouples feed fetcher from article processor | Live |
+| Cloud Functions | Event-driven triggers (e.g. onFeedAdded) | Live |
+| Vertex AI (text-embedding-004) | Semantic embeddings for article grouping | Planned |
+| Firebase Hosting | Serves the Next.js web app | Not used (web on Cloud Run) |
 
 ## Services
 
 ```
 ┌──────────────────┐     Cloud Scheduler (every 15 min)
 │  Feed Fetcher    │◄────────────────────────────────────
-│  (Cloud Run)     │
-│                  │  fetches RSS, Reddit, Substack
-└────────┬─────────┘
+│  (Cloud Run)     │◄────────────────────────────────────── onFeedAdded
+│                  │  fetches RSS feeds                     (Cloud Function,
+└────────┬─────────┘                                        Firestore trigger)
          │ publishes raw articles
          ▼
     [Pub/Sub topic: raw-articles]
-         │
+         │ (push subscription)
          ▼
 ┌──────────────────┐
-│Article Processor │  - normalizes articles
-│  (Cloud Run)     │  - computes text embeddings (Vertex AI)
-│                  │  - finds or creates cluster
+│Article Processor │  - deduplicates by URL
+│  (Cloud Run)     │  - clusters by Jaccard title similarity
 │                  │  - sets expiresAt
 └────────┬─────────┘
          │ writes
@@ -37,10 +37,17 @@
          │
          ▼
 ┌──────────────────┐
-│   API Service    │  REST, authenticated via Firebase Auth
-│  (Cloud Run)     │  consumed by web + mobile clients
+│   Web (Next.js)  │  authenticated via Firebase Auth
+│  (Cloud Run)     │  reads clusters + articles directly from Firestore
 └──────────────────┘
 ```
+
+## Key implementation notes
+
+- **Clustering** uses Jaccard similarity on stopword-filtered title tokens (no embeddings yet). Threshold: 0.3.
+- **Feed fetcher** queries feeds via `db.collectionGroup('feeds')` — the parent `users/{uid}` document is never explicitly created, only the subcollection.
+- **onFeedAdded** fires on `users/{uid}/feeds/{feedId}` document creation, fetches the new feed immediately, and publishes articles to Pub/Sub — articles appear within seconds of adding a feed rather than waiting up to 15 min for the scheduler.
+- **Pub/Sub push** delivers to article-processor at its Cloud Run URL, authenticated via `pubsub-push-sa` with `roles/run.invoker`.
 
 ## Data Model
 
@@ -108,13 +115,18 @@
 
 ## Article Grouping Logic
 
-1. New article arrives from processor.
-2. Compute text embedding via Vertex AI `text-embedding-004`.
-3. Load all non-expired clusters for this user created within a configurable time window (default: 48h).
-4. Compute cosine similarity between article embedding and each cluster's `centroidVector`.
-5. If similarity ≥ threshold (default: 0.85), add article to that cluster and update centroid.
-6. Otherwise, create a new cluster with this article as the seed.
-7. Set `expiresAt` on the article and cluster based on feed's `expiryHours`.
+Current implementation (Jaccard similarity):
+
+1. New article arrives via Pub/Sub push to article-processor.
+2. Deduplicate by `sourceUrl` — skip if already stored.
+3. Load all non-expired clusters for this user within the expiry window.
+4. Tokenize article title (lowercase, strip punctuation, remove stopwords).
+5. Compute Jaccard similarity between article tokens and each cluster's `topic` tokens.
+6. If best score ≥ 0.3, merge article into that cluster.
+7. Otherwise, create a new cluster seeded by this article's title.
+8. Set `expiresAt` on article and cluster based on feed's `expiryHours` (default: 48h).
+
+Planned upgrade: replace Jaccard with Vertex AI `text-embedding-004` cosine similarity for better semantic matching across paraphrased headlines.
 
 ## Article Expiration
 

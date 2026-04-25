@@ -1,3 +1,4 @@
+import 'dotenv/config'
 import express from 'express'
 import { initializeApp } from 'firebase-admin/app'
 import { getFirestore, Timestamp, FieldValue } from 'firebase-admin/firestore'

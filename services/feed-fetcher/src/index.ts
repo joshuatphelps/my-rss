@@ -1,3 +1,4 @@
+import 'dotenv/config'
 import express from 'express'
 import Parser from 'rss-parser'
 import { initializeApp } from 'firebase-admin/app'
@@ -26,14 +27,11 @@ app.post('/fetch', async (_req, res) => {
   let published = 0
 
   try {
-    const usersSnap = await db.collection('users').get()
+    const feedsSnap = await db.collectionGroup('feeds').get()
     const topic = PROCESSOR_URL ? null : pubsub.topic(TOPIC)
 
-    for (const userDoc of usersSnap.docs) {
-      const uid = userDoc.id
-      const feedsSnap = await db.collection('users').doc(uid).collection('feeds').get()
-
-      for (const feedDoc of feedsSnap.docs) {
+    for (const feedDoc of feedsSnap.docs) {
+      const uid = feedDoc.ref.parent.parent!.id
         const feed = feedDoc.data()
         if (feed.type !== 'rss') continue
 
@@ -79,7 +77,6 @@ app.post('/fetch', async (_req, res) => {
           errors.push(`feed ${feedDoc.id}: ${err}`)
           console.error(`Error fetching feed ${feedDoc.id}:`, err)
         }
-      }
     }
 
     res.json({ published, errors })

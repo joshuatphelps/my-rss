@@ -38,4 +38,4 @@ jobs:
         run: npm run build
 
       - name: Deploy functions
-        run: firebase deploy --only functions --project ${{ secrets.GCP_PROJECT_ID }}
+        run: firebase deploy --only functions --project ${{ secrets.GCP_PROJECT_ID }} --force

@@ -15,73 +15,92 @@ const pubsub = new PubSub()
 const parser = new Parser()
 
 const TOPIC = process.env.PUBSUB_TOPIC ?? 'raw-articles'
-// When set, POSTs directly to the processor instead of Pub/Sub (local dev only)
 const PROCESSOR_URL = process.env.ARTICLE_PROCESSOR_URL
+
+function log(severity: 'INFO' | 'WARNING' | 'ERROR', data: Record<string, unknown>) {
+  console.log(JSON.stringify({ severity, ...data }))
+}
 
 app.get('/health', (_req, res) => {
   res.json({ ok: true })
 })
 
 app.post('/fetch', async (_req, res) => {
-  const errors: string[] = []
+  const errors: Array<{ feedId: string; error: string }> = []
   let published = 0
+  const startedAt = Date.now()
 
   try {
     const feedsSnap = await db.collectionGroup('feeds').get()
+    const rssFeedCount = feedsSnap.docs.filter(d => d.data().type === 'rss').length
     const topic = PROCESSOR_URL ? null : pubsub.topic(TOPIC)
+
+    log('INFO', { event: 'fetch_started', feedCount: rssFeedCount })
 
     for (const feedDoc of feedsSnap.docs) {
       const uid = feedDoc.ref.parent.parent!.id
-        const feed = feedDoc.data()
-        if (feed.type !== 'rss') continue
+      const feed = feedDoc.data()
+      if (feed.type !== 'rss') continue
 
-        try {
-          const parsed = await parser.parseURL(feed.url as string)
-          const lastFetched: Date = (feed.lastFetchedAt as Timestamp | null)?.toDate() ?? new Date(0)
+      const feedId = feedDoc.id
+      const feedTitle = (feed.title as string) ?? feed.url
 
-          const newItems = parsed.items.filter(item => {
-            if (!item.isoDate) return true
-            return new Date(item.isoDate) > lastFetched
-          })
+      try {
+        const parsed = await parser.parseURL(feed.url as string)
+        const lastFetched: Date = (feed.lastFetchedAt as Timestamp | null)?.toDate() ?? new Date(0)
 
-          for (const item of newItems) {
-            const message = {
-              uid,
-              feedId: feedDoc.id,
-              expiryHours: (feed.expiryHours as number | null) ?? 48,
-              article: {
-                title: item.title ?? 'Untitled',
-                sourceUrl: item.link ?? '',
-                body: item.contentSnippet ?? item.content ?? '',
-                author: item.creator ?? null,
-                publishedAt: item.isoDate ?? new Date().toISOString(),
-                source: (feed.title as string) ?? new URL(feed.url as string).hostname,
-              },
-            }
-            if (PROCESSOR_URL) {
-              const encoded = Buffer.from(JSON.stringify(message)).toString('base64')
-              const resp = await fetch(PROCESSOR_URL, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ message: { data: encoded } }),
-              })
-              if (!resp.ok) throw new Error(`Processor returned ${resp.status}`)
-            } else {
-              await topic!.publishMessage({ json: message })
-            }
-            published++
+        const newItems = parsed.items.filter(item => {
+          if (!item.isoDate) return true
+          return new Date(item.isoDate) > lastFetched
+        })
+
+        for (const item of newItems) {
+          const message = {
+            uid,
+            feedId,
+            expiryHours: (feed.expiryHours as number | null) ?? 48,
+            article: {
+              title: item.title ?? 'Untitled',
+              sourceUrl: item.link ?? '',
+              body: item.contentSnippet ?? item.content ?? '',
+              author: item.creator ?? null,
+              publishedAt: item.isoDate ?? new Date().toISOString(),
+              source: (feed.title as string) ?? new URL(feed.url as string).hostname,
+            },
           }
-
-          await feedDoc.ref.update({ lastFetchedAt: Timestamp.now() })
-        } catch (err) {
-          errors.push(`feed ${feedDoc.id}: ${err}`)
-          console.error(`Error fetching feed ${feedDoc.id}:`, err)
+          if (PROCESSOR_URL) {
+            const encoded = Buffer.from(JSON.stringify(message)).toString('base64')
+            const resp = await fetch(PROCESSOR_URL, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ message: { data: encoded } }),
+            })
+            if (!resp.ok) throw new Error(`Processor returned ${resp.status}`)
+          } else {
+            await topic!.publishMessage({ json: message })
+          }
+          published++
         }
+
+        log('INFO', { event: 'feed_fetched', feedId, feedTitle, articlesPublished: newItems.length })
+        await feedDoc.ref.update({ lastFetchedAt: Timestamp.now() })
+      } catch (err) {
+        const error = String(err)
+        errors.push({ feedId, error })
+        log('ERROR', { event: 'feed_fetch_error', feedId, feedTitle, error })
+      }
     }
+
+    log('INFO', {
+      event: 'fetch_complete',
+      totalPublished: published,
+      totalErrors: errors.length,
+      durationMs: Date.now() - startedAt,
+    })
 
     res.json({ published, errors })
   } catch (err) {
-    console.error('Fatal fetch error:', err)
+    log('ERROR', { event: 'fetch_fatal', error: String(err), durationMs: Date.now() - startedAt })
     res.status(500).json({ error: String(err) })
   }
 })

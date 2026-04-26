@@ -4,6 +4,7 @@ import Parser from 'rss-parser'
 import { initializeApp } from 'firebase-admin/app'
 import { getFirestore, Timestamp } from 'firebase-admin/firestore'
 import { PubSub } from '@google-cloud/pubsub'
+import { BigQuery } from '@google-cloud/bigquery'
 
 initializeApp()
 
@@ -13,12 +14,20 @@ app.use(express.json())
 const db = getFirestore()
 const pubsub = new PubSub()
 const parser = new Parser()
+const bq = new BigQuery()
 
 const TOPIC = process.env.PUBSUB_TOPIC ?? 'raw-articles'
 const PROCESSOR_URL = process.env.ARTICLE_PROCESSOR_URL
+const BQ_DATASET = process.env.BQ_DATASET ?? 'my_rss_analytics'
 
 function log(severity: 'INFO' | 'WARNING' | 'ERROR', data: Record<string, unknown>) {
   console.log(JSON.stringify({ severity, ...data }))
+}
+
+function writeToBQ(table: string, row: Record<string, unknown>): void {
+  bq.dataset(BQ_DATASET).table(table).insert([row]).catch((err: unknown) => {
+    log('WARNING', { event: 'bq_insert_failed', table, error: String(err) })
+  })
 }
 
 app.get('/health', (_req, res) => {
@@ -36,6 +45,7 @@ app.post('/fetch', async (_req, res) => {
     const topic = PROCESSOR_URL ? null : pubsub.topic(TOPIC)
 
     log('INFO', { event: 'fetch_started', feedCount: rssFeedCount })
+    writeToBQ('fetch_runs', { timestamp: new Date(), event: 'fetch_started', feed_count: rssFeedCount })
 
     for (const feedDoc of feedsSnap.docs) {
       const uid = feedDoc.ref.parent.parent!.id
@@ -83,24 +93,25 @@ app.post('/fetch', async (_req, res) => {
         }
 
         log('INFO', { event: 'feed_fetched', feedId, feedTitle, articlesPublished: newItems.length })
+        writeToBQ('feed_fetches', { timestamp: new Date(), feed_id: feedId, feed_title: feedTitle, articles_published: newItems.length })
         await feedDoc.ref.update({ lastFetchedAt: Timestamp.now() })
       } catch (err) {
         const error = String(err)
         errors.push({ feedId, error })
         log('ERROR', { event: 'feed_fetch_error', feedId, feedTitle, error })
+        writeToBQ('fetch_errors', { timestamp: new Date(), feed_id: feedId, feed_title: feedTitle, error })
       }
     }
 
-    log('INFO', {
-      event: 'fetch_complete',
-      totalPublished: published,
-      totalErrors: errors.length,
-      durationMs: Date.now() - startedAt,
-    })
+    const durationMs = Date.now() - startedAt
+    log('INFO', { event: 'fetch_complete', totalPublished: published, totalErrors: errors.length, durationMs })
+    writeToBQ('fetch_completions', { timestamp: new Date(), total_published: published, total_errors: errors.length, duration_ms: durationMs })
 
     res.json({ published, errors })
   } catch (err) {
-    log('ERROR', { event: 'fetch_fatal', error: String(err), durationMs: Date.now() - startedAt })
+    const fatalDurationMs = Date.now() - startedAt
+    log('ERROR', { event: 'fetch_fatal', error: String(err), durationMs: fatalDurationMs })
+    writeToBQ('fetch_fatals', { timestamp: new Date(), error: String(err), duration_ms: fatalDurationMs })
     res.status(500).json({ error: String(err) })
   }
 })

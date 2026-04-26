@@ -75,6 +75,24 @@ resource.labels.service_name="feed-fetcher"
 jsonPayload.event="feed_fetch_error"
 ```
 
+## Planning
+
+For non-trivial implementation tasks or technical decisions, propose a plan using the ADR format before writing code:
+
+```
+# ADR-[number]: [Title]
+**Status:** Proposed | Accepted
+**Date:** [Date]
+
+## Context
+## Decision
+## Options Considered (with trade-off table)
+## Consequences
+## Action Items
+```
+
+Use `/architecture` to invoke this explicitly.
+
 ## GCP project
 
 - Project ID: `my-rss-prod`

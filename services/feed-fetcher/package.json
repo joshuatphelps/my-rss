@@ -8,6 +8,7 @@
     "dev": "ts-node src/index.ts"
   },
   "dependencies": {
+    "@google-cloud/bigquery": "^8.1.1",
     "@google-cloud/pubsub": "^4.5.0",
     "dotenv": "^17.4.2",
     "express": "^4.19.0",
